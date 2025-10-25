@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://tradeportofoliu.onrender.com';
+const API_BASE_URL = 'https://tradeportofoliu-backend.onrender.com';
 
 export const fetchPortfolio = async () => {
   try {
