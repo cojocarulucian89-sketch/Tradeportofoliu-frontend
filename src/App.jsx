@@ -11,11 +11,14 @@ const API_KEYS = {
 
 function App() {
   const [portfolioData, setPortfolioData] = useState([]);
+  const [allTransactions, setAllTransactions] = useState([]);
+  const [transactionFilter, setTransactionFilter] = useState('ALL');
   const [isLoading, setIsLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const [selectedStock, setSelectedStock] = useState(null);
   const [darkMode, setDarkMode] = useState(false);
   const [alerts, setAlerts] = useState([]);
+  const [viewMode, setViewMode] = useState('portfolio'); // 'portfolio' or 'transactions'
   const fileInputRef = useRef(null);
   const chartRefs = useRef({});
 
@@ -150,7 +153,7 @@ function App() {
     }
   };
 
-  // Handle file upload with REVOLUT FORMAT SUPPORT - FUNCȚIE CORECTATĂ
+  // Handle file upload with ALL TRANSACTIONS SUPPORT
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -169,12 +172,24 @@ function App() {
       }
 
       const header = lines[0].toLowerCase();
+      let parsedTransactions = [];
       let parsedData = [];
 
       // DETECT FORMAT: Revolut vs Simple CSV
-      if (header.includes('ticker') && header.includes('type') && header.includes('quantity')) {
-        // ✅ REVOLUT FORMAT
+      if (header.includes('ticker') && header.includes('type') && (header.includes('quantity') || header.includes('total amount'))) {
+        // ✅ REVOLUT FORMAT DETECTAT
         console.log('Detected Revolut format');
+        
+        // Parse header pentru a găsi indicii coloanelor
+        const headerParts = lines[0].split(',');
+        const dateIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'date');
+        const tickerIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'ticker');
+        const typeIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'type');
+        const quantityIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'quantity');
+        const priceIdx = headerParts.findIndex(h => h.toLowerCase().includes('price per share'));
+        const totalAmountIdx = headerParts.findIndex(h => h.toLowerCase().includes('total amount'));
+        
+        console.log('Column indices:', { dateIdx, tickerIdx, typeIdx, quantityIdx, priceIdx, totalAmountIdx });
         
         const holdings = {};
         
@@ -182,37 +197,47 @@ function App() {
           const line = lines[i].trim();
           if (!line) continue;
           
-          // Split by comma, handle quoted values
-          const values = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+          // Split by comma
+          const values = line.split(',');
           
           if (values.length < 6) continue;
           
-          const ticker = values[1]?.replace(/"/g, '').trim();
-          const type = values[2]?.replace(/"/g, '').trim();
-          const quantityStr = values[3]?.replace(/"/g, '').trim();
-          const priceStr = values[4]?.replace(/"/g, '').replace('€', '').replace('$', '').trim();
+          const date = values[dateIdx]?.trim();
+          const ticker = values[tickerIdx]?.trim();
+          const type = values[typeIdx]?.trim();
+          const quantityStr = values[quantityIdx]?.trim();
+          const priceStr = values[priceIdx]?.replace(/[€$]/g, '').trim();
+          const totalAmountStr = values[totalAmountIdx]?.replace(/[€$]/g, '').trim();
           
-          // Only process BUY transactions
-          if (!ticker || !type.includes('BUY')) continue;
+          const quantity = parseFloat(quantityStr) || 0;
+          const price = parseFloat(priceStr) || 0;
+          const totalAmount = parseFloat(totalAmountStr) || 0;
           
-          const quantity = parseFloat(quantityStr);
-          const price = parseFloat(priceStr);
+          // SALVEAZĂ TOATE TRANZACȚIILE
+          parsedTransactions.push({
+            date,
+            ticker: ticker || 'N/A',
+            type,
+            quantity,
+            price,
+            totalAmount
+          });
           
-          if (isNaN(quantity) || isNaN(price) || quantity <= 0) continue;
-          
-          // Aggregate by ticker
-          if (!holdings[ticker]) {
-            holdings[ticker] = {
-              symbol: ticker,
-              totalShares: 0,
-              totalCost: 0,
-              transactions: []
-            };
+          // AGREGARE doar pentru tranzacții BUY cu ticker valid
+          if (ticker && ticker !== '' && type.includes('BUY')) {
+            if (!holdings[ticker]) {
+              holdings[ticker] = {
+                symbol: ticker,
+                totalShares: 0,
+                totalCost: 0,
+                transactions: []
+              };
+            }
+            
+            holdings[ticker].totalShares += quantity;
+            holdings[ticker].totalCost += (quantity * price);
+            holdings[ticker].transactions.push({ date, quantity, price });
           }
-          
-          holdings[ticker].totalShares += quantity;
-          holdings[ticker].totalCost += (quantity * price);
-          holdings[ticker].transactions.push({ quantity, price });
         }
         
         // Convert to array and calculate average buy price
@@ -222,6 +247,9 @@ function App() {
           buyPrice: holding.totalCost / holding.totalShares,
           totalCost: holding.totalCost
         }));
+        
+        console.log(`Parsed ${parsedTransactions.length} transactions`);
+        console.log(`Parsed ${parsedData.length} unique stock holdings`);
         
       } else {
         // ✅ SIMPLE FORMAT (Symbol,Shares,BuyPrice,TotalCost)
@@ -251,14 +279,15 @@ function App() {
         }
       }
 
+      // Save all transactions
+      setAllTransactions(parsedTransactions);
+
       if (parsedData.length === 0) {
-        setUploadStatus('No valid data found');
+        setUploadStatus(`Loaded ${parsedTransactions.length} transactions. No stock holdings found.`);
         setIsLoading(false);
         return;
       }
 
-      console.log(`Parsed ${parsedData.length} holdings:`, parsedData);
-      
       setUploadStatus(`Loaded ${parsedData.length} stocks. Fetching live data...`);
       
       // Fetch live prices for all stocks
@@ -338,6 +367,20 @@ function App() {
   };
 
   const metrics = calculateMetrics();
+
+  // Filter transactions based on selected type
+  const filteredTransactions = transactionFilter === 'ALL' 
+    ? allTransactions 
+    : allTransactions.filter(tx => tx.type.includes(transactionFilter));
+
+  // Get unique transaction types for filter
+  const transactionTypes = ['ALL', ...new Set(allTransactions.map(tx => {
+    if (tx.type.includes('BUY')) return 'BUY';
+    if (tx.type.includes('SELL')) return 'SELL';
+    if (tx.type.includes('DIVIDEND')) return 'DIVIDEND';
+    if (tx.type.includes('CASH')) return 'CASH';
+    return 'OTHER';
+  }))];
 
   // Render mini chart
   const renderMiniChart = (data) => {
@@ -423,7 +466,7 @@ function App() {
       )}
 
       {/* Portfolio Content */}
-      {portfolioData.length === 0 ? (
+      {portfolioData.length === 0 && allTransactions.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state__content">
             <div className="empty-state__icon">📈</div>
@@ -444,111 +487,187 @@ function App() {
         </div>
       ) : (
         <>
-          {/* Metrics Grid */}
-          {metrics && (
-            <div className="metrics-grid">
-              <div className="metric-card">
-                <div className="metric-card__label">💰 Total Invested</div>
-                <div className="metric-card__value">
-                  €{metrics.totalInvested.toFixed(2)}
-                </div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-card__label">📈 Current Value</div>
-                <div className="metric-card__value">
-                  €{metrics.totalCurrent.toFixed(2)}
-                </div>
-              </div>
-              <div className={`metric-card ${metrics.totalProfitLoss >= 0 ? 'metric-card--positive' : 'metric-card--negative'}`}>
-                <div className="metric-card__label">💵 Total P/L</div>
-                <div className="metric-card__value">
-                  {metrics.totalProfitLoss >= 0 ? '+' : ''}€{metrics.totalProfitLoss.toFixed(2)}
-                  <span className="metric-card__percentage">
-                    ({metrics.totalProfitLossPercent >= 0 ? '+' : ''}{metrics.totalProfitLossPercent.toFixed(2)}%)
-                  </span>
-                </div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-card__label">📊 Portfolio Stats</div>
-                <div className="metric-card__stats">
-                  <span className="stat-badge stat-badge--success">
-                    {metrics.gainers} 🚀 Gainers
-                  </span>
-                  <span className="stat-badge stat-badge--danger">
-                    {metrics.losers} 📉 Losers
-                  </span>
-                </div>
-                {metrics.totalDividends > 0 && (
-                  <div className="metric-card__dividends">
-                    💎 Annual Dividends: €{metrics.totalDividends.toFixed(2)}
+          {/* View Mode Tabs */}
+          <div className="view-tabs">
+            <button 
+              className={`view-tab ${viewMode === 'portfolio' ? 'active' : ''}`}
+              onClick={() => setViewMode('portfolio')}
+            >
+              📊 Portfolio ({portfolioData.length} stocks)
+            </button>
+            <button 
+              className={`view-tab ${viewMode === 'transactions' ? 'active' : ''}`}
+              onClick={() => setViewMode('transactions')}
+            >
+              📜 Transactions ({allTransactions.length})
+            </button>
+          </div>
+
+          {/* PORTFOLIO VIEW */}
+          {viewMode === 'portfolio' && portfolioData.length > 0 && (
+            <>
+              {/* Metrics Grid */}
+              {metrics && (
+                <div className="metrics-grid">
+                  <div className="metric-card">
+                    <div className="metric-card__label">💰 Total Invested</div>
+                    <div className="metric-card__value">
+                      €{metrics.totalInvested.toFixed(2)}
+                    </div>
                   </div>
-                )}
+                  <div className="metric-card">
+                    <div className="metric-card__label">📈 Current Value</div>
+                    <div className="metric-card__value">
+                      €{metrics.totalCurrent.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className={`metric-card ${metrics.totalProfitLoss >= 0 ? 'metric-card--positive' : 'metric-card--negative'}`}>
+                    <div className="metric-card__label">💵 Total P/L</div>
+                    <div className="metric-card__value">
+                      {metrics.totalProfitLoss >= 0 ? '+' : ''}€{metrics.totalProfitLoss.toFixed(2)}
+                      <span className="metric-card__percentage">
+                        ({metrics.totalProfitLossPercent >= 0 ? '+' : ''}{metrics.totalProfitLossPercent.toFixed(2)}%)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <div className="metric-card__label">📊 Portfolio Stats</div>
+                    <div className="metric-card__stats">
+                      <span className="stat-badge stat-badge--success">
+                        {metrics.gainers} 🚀 Gainers
+                      </span>
+                      <span className="stat-badge stat-badge--danger">
+                        {metrics.losers} 📉 Losers
+                      </span>
+                    </div>
+                    {metrics.totalDividends > 0 && (
+                      <div className="metric-card__dividends">
+                        💎 Annual Dividends: €{metrics.totalDividends.toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Stocks Grid */}
+              <div className="stocks-grid">
+                {portfolioData.map((stock, index) => (
+                  <div 
+                    key={index} 
+                    className="stock-card"
+                    onClick={() => setSelectedStock(stock)}
+                  >
+                    <div className="stock-card__header">
+                      <div className="stock-card__symbol">{stock.symbol}</div>
+                      <div className={`stock-card__change ${stock.profitLoss >= 0 ? 'positive' : 'negative'}`}>
+                        {stock.profitLoss >= 0 ? '📈 +' : '📉 '}{stock.profitLossPercent.toFixed(2)}%
+                      </div>
+                    </div>
+                    
+                    <div className="stock-card__price">
+                      <div className="price-label">Current Price</div>
+                      <div className="price-value">€{stock.currentPrice.toFixed(2)}</div>
+                    </div>
+
+                    {/* Mini Chart */}
+                    {stock.historical && stock.historical.length > 0 && (
+                      <div className="stock-card__chart">
+                        {renderMiniChart(stock.historical)}
+                      </div>
+                    )}
+
+                    <div className="stock-card__details">
+                      <div className="detail-row">
+                        <span className="detail-label">Shares:</span>
+                        <span className="detail-value">{stock.shares.toFixed(4)}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Avg Buy:</span>
+                        <span className="detail-value">€{stock.buyPrice.toFixed(2)}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Invested:</span>
+                        <span className="detail-value">€{stock.totalCost.toFixed(2)}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Value:</span>
+                        <span className="detail-value">€{stock.currentValue.toFixed(2)}</span>
+                      </div>
+                      {stock.dividends && stock.dividends.annual > 0 && (
+                        <div className="detail-row">
+                          <span className="detail-label">💎 Div Yield:</span>
+                          <span className="detail-value positive">
+                            {((stock.dividends.annual / stock.currentPrice) * 100).toFixed(2)}%
+                          </span>
+                        </div>
+                      )}
+                      <div className={`detail-row detail-row--highlight ${stock.profitLoss >= 0 ? 'positive' : 'negative'}`}>
+                        <span className="detail-label">P/L:</span>
+                        <span className="detail-value">
+                          {stock.profitLoss >= 0 ? '+' : ''}€{stock.profitLoss.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* TRANSACTIONS VIEW */}
+          {viewMode === 'transactions' && allTransactions.length > 0 && (
+            <div className="transactions-view">
+              {/* Transaction Filter */}
+              <div className="transaction-filter">
+                <label>Filter by Type:</label>
+                <div className="filter-buttons">
+                  {transactionTypes.map(type => (
+                    <button
+                      key={type}
+                      className={`filter-btn ${transactionFilter === type ? 'active' : ''}`}
+                      onClick={() => setTransactionFilter(type)}
+                    >
+                      {type} ({type === 'ALL' ? allTransactions.length : allTransactions.filter(tx => tx.type.includes(type)).length})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Transaction Table */}
+              <div className="transactions-table-container">
+                <table className="transactions-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Ticker</th>
+                      <th>Type</th>
+                      <th>Quantity</th>
+                      <th>Price</th>
+                      <th>Total Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTransactions.map((tx, index) => (
+                      <tr key={index} className={`transaction-row ${tx.type.includes('BUY') ? 'buy' : tx.type.includes('SELL') ? 'sell' : tx.type.includes('DIVIDEND') ? 'dividend' : 'cash'}`}>
+                        <td>{new Date(tx.date).toLocaleDateString()}</td>
+                        <td><strong>{tx.ticker}</strong></td>
+                        <td>
+                          <span className={`type-badge ${tx.type.includes('BUY') ? 'buy' : tx.type.includes('SELL') ? 'sell' : tx.type.includes('DIVIDEND') ? 'dividend' : 'cash'}`}>
+                            {tx.type}
+                          </span>
+                        </td>
+                        <td>{tx.quantity > 0 ? tx.quantity.toFixed(4) : '-'}</td>
+                        <td>{tx.price > 0 ? `€${tx.price.toFixed(2)}` : '-'}</td>
+                        <td className={tx.totalAmount >= 0 ? 'positive' : 'negative'}>
+                          {tx.totalAmount >= 0 ? '+' : ''}€{Math.abs(tx.totalAmount).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
-
-          {/* Stocks Grid */}
-          <div className="stocks-grid">
-            {portfolioData.map((stock, index) => (
-              <div 
-                key={index} 
-                className="stock-card"
-                onClick={() => setSelectedStock(stock)}
-              >
-                <div className="stock-card__header">
-                  <div className="stock-card__symbol">{stock.symbol}</div>
-                  <div className={`stock-card__change ${stock.profitLoss >= 0 ? 'positive' : 'negative'}`}>
-                    {stock.profitLoss >= 0 ? '📈 +' : '📉 '}{stock.profitLossPercent.toFixed(2)}%
-                  </div>
-                </div>
-                
-                <div className="stock-card__price">
-                  <div className="price-label">Current Price</div>
-                  <div className="price-value">€{stock.currentPrice.toFixed(2)}</div>
-                </div>
-
-                {/* Mini Chart */}
-                {stock.historical && stock.historical.length > 0 && (
-                  <div className="stock-card__chart">
-                    {renderMiniChart(stock.historical)}
-                  </div>
-                )}
-
-                <div className="stock-card__details">
-                  <div className="detail-row">
-                    <span className="detail-label">Shares:</span>
-                    <span className="detail-value">{stock.shares.toFixed(4)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Avg Buy:</span>
-                    <span className="detail-value">€{stock.buyPrice.toFixed(2)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Invested:</span>
-                    <span className="detail-value">€{stock.totalCost.toFixed(2)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Value:</span>
-                    <span className="detail-value">€{stock.currentValue.toFixed(2)}</span>
-                  </div>
-                  {stock.dividends && stock.dividends.annual > 0 && (
-                    <div className="detail-row">
-                      <span className="detail-label">💎 Div Yield:</span>
-                      <span className="detail-value positive">
-                        {((stock.dividends.annual / stock.currentPrice) * 100).toFixed(2)}%
-                      </span>
-                    </div>
-                  )}
-                  <div className={`detail-row detail-row--highlight ${stock.profitLoss >= 0 ? 'positive' : 'negative'}`}>
-                    <span className="detail-label">P/L:</span>
-                    <span className="detail-value">
-                      {stock.profitLoss >= 0 ? '+' : ''}€{stock.profitLoss.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
         </>
       )}
       {/* Modal for Stock Details */}
