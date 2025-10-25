@@ -99,26 +99,55 @@ function App() {
   const [priceCache, setPriceCache] = useState({});
   const fileInputRef = useRef(null);
 
-  // Fetch stock price from Finnhub API
+   // Fetch stock price and currency from Finnhub API
   const fetchStockPrice = async (symbol) => {
     // Check cache first
     if (priceCache[symbol] && Date.now() - priceCache[symbol].timestamp < 30000) {
-      return priceCache[symbol].price;
+      return priceCache[symbol];
     }
 
     try {
-      const response = await fetch(
+      // Get stock profile to determine exchange/currency
+      const profileResponse = await fetch(
+        `https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${API_KEYS.finnhub}`
+      );
+      const profileData = await profileResponse.json();
+      
+      // Determine currency based on exchange
+      let currency = '$'; // Default to USD
+      if (profileData.currency) {
+        currency = profileData.currency === 'EUR' ? '€' : 
+                   profileData.currency === 'GBP' ? '£' : 
+                   profileData.currency === 'USD' ? '$' : '$';
+      } else if (profileData.exchange) {
+        // Fallback: detect from exchange name
+        const exchange = profileData.exchange.toUpperCase();
+        if (exchange.includes('XETRA') || exchange.includes('EURONEXT') || exchange.includes('PARIS')) {
+          currency = '€';
+        } else if (exchange.includes('LONDON') || exchange.includes('LSE')) {
+          currency = '£';
+        }
+      }
+      
+      // Get quote (price)
+      const quoteResponse = await fetch(
         `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${API_KEYS.finnhub}`
       );
-      const data = await response.json();
+      const quoteData = await quoteResponse.json();
       
-      if (data.c && data.c > 0) {
-        const price = data.c; // Current price
+      if (quoteData.c && quoteData.c > 0) {
+        const priceData = { 
+          price: quoteData.c, 
+          currency,
+          timestamp: Date.now() 
+        };
+        
         setPriceCache(prev => ({
           ...prev,
-          [symbol]: { price, timestamp: Date.now() }
+          [symbol]: priceData
         }));
-        return price;
+        
+        return priceData;
       }
       
       return null;
@@ -127,6 +156,7 @@ function App() {
       return null;
     }
   };
+
 
   // Fetch historical data for charts
   const fetchChartData = async (symbol) => {
