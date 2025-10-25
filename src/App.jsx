@@ -33,6 +33,14 @@ function App() {
   const [priceUpdateTime, setPriceUpdateTime] = useState(null);
   const [showChartModal, setShowChartModal] = useState(false);
   const [chartStock, setChartStock] = useState(null);
+  
+  // NEW: Notifications & Ticker Fixer
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showTickerFixer, setShowTickerFixer] = useState(false);
+  const [tickerToFix, setTickerToFix] = useState(null);
+  const [searchResults, setSearchResults] = useState([]);
+  const [tickerSearchQuery, setTickerSearchQuery] = useState('');
+  
   const fileInputRef = useRef(null);
 
   // Dark mode is default and permanent
@@ -52,14 +60,19 @@ function App() {
   }, [portfolioData]);
 
   // ============================================
-  // ALERT SYSTEM
+  // ALERT SYSTEM - NOW WITH SILENT MODE
   // ============================================
-  const showAlert = (message, type = 'info') => {
+  const showAlert = (message, type = 'info', silent = false) => {
     const id = Date.now();
-    setAlerts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setAlerts(prev => prev.filter(alert => alert.id !== id));
-    }, 5000);
+    const newAlert = { id, message, type, timestamp: new Date() };
+    setAlerts(prev => [...prev, newAlert]);
+    
+    // Auto-hide only if panel is not open
+    if (!showNotifications && !silent) {
+      setTimeout(() => {
+        setAlerts(prev => prev.filter(alert => alert.id !== id));
+      }, 5000);
+    }
   };
 
   // ============================================
@@ -100,7 +113,7 @@ function App() {
 
     // If all APIs fail, return 0 and show warning
     console.error(`❌ All APIs failed for ${symbol}`);
-    showAlert(`Could not fetch price for ${symbol}`, 'warning');
+    showAlert(`Could not fetch price for ${symbol}`, 'warning', true);
     return 0;
   };
 
@@ -238,125 +251,236 @@ function App() {
   };
 
   // ============================================
-  // FILE UPLOAD HANDLER - Revolut CSV Parser
+  // TICKER SEARCH & FIX - NEW FEATURE
+  // ============================================
+  const searchTickerAPI = async (query) => {
+    if (!query || query.length < 2) return [];
+    
+    try {
+      // Try FMP API symbol search
+      const response = await fetch(
+        `https://financialmodelingprep.com/api/v3/search?query=${query}&limit=15&apikey=${API_KEYS.fmp}`
+      );
+      const data = await response.json();
+      
+      if (data && data.length > 0) {
+        return data.map(item => ({
+          symbol: item.symbol,
+          name: item.name,
+          exchange: item.exchangeShortName,
+          currency: item.currency,
+          type: item.type
+        }));
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('Error searching ticker:', error);
+      return [];
+    }
+  };
+
+  const handleTickerSearch = async (symbol) => {
+    setTickerToFix(symbol);
+    setTickerSearchQuery(symbol);
+    setShowTickerFixer(true);
+    
+    // Search for similar tickers
+    const results = await searchTickerAPI(symbol);
+    setSearchResults(results);
+    
+    if (results.length === 0) {
+      showAlert(`No results found for "${symbol}". Try a different search.`, 'warning');
+    }
+  };
+
+  const performCustomSearch = async () => {
+    if (!tickerSearchQuery || tickerSearchQuery.length < 2) {
+      showAlert('Please enter at least 2 characters', 'warning');
+      return;
+    }
+    
+    const results = await searchTickerAPI(tickerSearchQuery);
+    setSearchResults(results);
+    
+    if (results.length === 0) {
+      showAlert(`No results found for "${tickerSearchQuery}"`, 'warning');
+    }
+  };
+
+  const applyTickerFix = async (oldSymbol, newSymbol) => {
+    setIsLoading(true);
+    showAlert(`Updating ${oldSymbol} → ${newSymbol}...`, 'info');
+    
+    try {
+      // Update portfolio data with new ticker
+      const updatedData = await Promise.all(
+        portfolioData.map(async (stock) => {
+          if (stock.symbol === oldSymbol) {
+            const livePrice = await fetchLivePrice(newSymbol);
+            
+            if (livePrice === 0) {
+              showAlert(`❌ Still could not fetch price for ${newSymbol}`, 'error');
+              return stock;
+            }
+            
+            const currentValue = stock.shares * livePrice;
+            const profitLoss = currentValue - stock.totalCost;
+            const profitLossPercent = (profitLoss / stock.totalCost) * 100;
+            
+            const historical = await fetchHistoricalData(newSymbol);
+            const fundamentals = await fetchFundamentals(newSymbol);
+            const dividends = await fetchDividends(newSymbol);
+            
+            return {
+              ...stock,
+              symbol: newSymbol,
+              currentPrice: livePrice,
+              currentValue,
+              profitLoss,
+              profitLossPercent,
+              historical,
+              fundamentals,
+              dividends
+            };
+          }
+          return stock;
+        })
+      );
+      
+      setPortfolioData(updatedData);
+      setShowTickerFixer(false);
+      setTickerToFix(null);
+      setSearchResults([]);
+      setTickerSearchQuery('');
+      showAlert(`✅ Successfully updated ${oldSymbol} → ${newSymbol}`, 'success');
+    } catch (error) {
+      console.error('Error applying ticker fix:', error);
+      showAlert('Failed to update ticker', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  // ============================================
+  // CSV FILE UPLOAD & PARSING
   // ============================================
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
+    // Validate file type
+    if (!file.name.endsWith('.csv')) {
+      showAlert('❌ Please upload a valid CSV file', 'error');
+      return;
+    }
+
     setIsLoading(true);
-    setUploadStatus(`📁 Uploading ${file.name}...`);
+    setUploadStatus('Reading CSV file...');
 
-    try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      
-      if (lines.length === 0) {
-        setUploadStatus('❌ No data found in file');
-        setIsLoading(false);
-        return;
-      }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          showAlert('❌ CSV file is empty or invalid', 'error');
+          setIsLoading(false);
+          return;
+        }
 
-      const header = lines[0].toLowerCase();
-      let parsedTransactions = [];
-      let parsedData = [];
+        // Parse header
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        console.log('📋 CSV Headers:', headers);
 
-      // REVOLUT FORMAT DETECTION
-      if (header.includes('ticker') && header.includes('type')) {
-        console.log('📊 Detected Revolut CSV format');
-        
-        const headerParts = lines[0].split(',');
-        const dateIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'date');
-        const tickerIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'ticker');
-        const typeIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'type');
-        const quantityIdx = headerParts.findIndex(h => h.toLowerCase().trim() === 'quantity');
-        const priceIdx = headerParts.findIndex(h => h.toLowerCase().includes('price per share'));
-        const totalAmountIdx = headerParts.findIndex(h => h.toLowerCase().includes('total amount'));
-        
-        const holdings = {};
-        
+        // Find required column indices
+        const dateIndex = headers.findIndex(h => h.toLowerCase().includes('date'));
+        const tickerIndex = headers.findIndex(h => h.toLowerCase().includes('ticker'));
+        const typeIndex = headers.findIndex(h => h.toLowerCase().includes('type'));
+        const quantityIndex = headers.findIndex(h => h.toLowerCase().includes('quantity') || h.toLowerCase().includes('no. of shares'));
+        const priceIndex = headers.findIndex(h => h.toLowerCase().includes('price per share'));
+        const totalIndex = headers.findIndex(h => h.toLowerCase().includes('total amount'));
+
+        if (tickerIndex === -1 || typeIndex === -1) {
+          showAlert('❌ CSV must contain Ticker and Type columns', 'error');
+          setIsLoading(false);
+          return;
+        }
+
+        // Parse all transactions
+        const transactions = [];
+        const portfolio = {};
+
         for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
+          const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
           
-          const values = line.split(',');
-          
-          const date = values[dateIdx]?.trim();
-          const ticker = values[tickerIdx]?.trim();
-          const type = values[typeIdx]?.trim();
-          const quantity = parseFloat(values[quantityIdx]?.trim()) || 0;
-          const price = parseFloat(values[priceIdx]?.replace(/[€$£]/g, '').trim()) || 0;
-          const totalAmount = parseFloat(values[totalAmountIdx]?.replace(/[€$£]/g, '').trim()) || 0;
-          
-          // Store ALL transactions
-          parsedTransactions.push({
+          const date = dateIndex !== -1 ? values[dateIndex] : '';
+          const ticker = tickerIndex !== -1 ? values[tickerIndex] : '';
+          const type = typeIndex !== -1 ? values[typeIndex] : '';
+          const quantity = quantityIndex !== -1 ? parseFloat(values[quantityIndex]) || 0 : 0;
+          const price = priceIndex !== -1 ? parseFloat(values[priceIndex]) || 0 : 0;
+          const totalAmount = totalIndex !== -1 ? parseFloat(values[totalIndex]) || 0 : 0;
+
+          // Skip invalid rows
+          if (!ticker || !type) continue;
+
+          // Store transaction
+          transactions.push({
             date,
-            ticker: ticker || 'N/A',
+            ticker,
             type,
             quantity,
             price,
             totalAmount
           });
-          
-          // Aggregate BUY transactions for portfolio
-          if (ticker && ticker !== '' && type && type.includes('BUY')) {
-            if (!holdings[ticker]) {
-              holdings[ticker] = {
+
+          // Process portfolio holdings (only BUY transactions with ticker symbols)
+          if (type.toUpperCase().includes('BUY') && ticker && quantity > 0) {
+            if (!portfolio[ticker]) {
+              portfolio[ticker] = {
                 symbol: ticker,
-                totalShares: 0,
-                totalCost: 0
+                shares: 0,
+                totalCost: 0,
+                buyPrice: 0
               };
             }
             
-            holdings[ticker].totalShares += quantity;
-            holdings[ticker].totalCost += Math.abs(totalAmount);
+            portfolio[ticker].shares += quantity;
+            portfolio[ticker].totalCost += Math.abs(totalAmount);
+            portfolio[ticker].buyPrice = portfolio[ticker].totalCost / portfolio[ticker].shares;
+          } else if (type.toUpperCase().includes('SELL') && ticker && quantity > 0) {
+            if (portfolio[ticker]) {
+              portfolio[ticker].shares -= quantity;
+              if (portfolio[ticker].shares <= 0) {
+                delete portfolio[ticker];
+              }
+            }
           }
         }
-        
-        parsedData = Object.values(holdings).map(holding => ({
-          symbol: holding.symbol,
-          shares: holding.totalShares,
-          buyPrice: holding.totalCost / holding.totalShares,
-          totalCost: holding.totalCost
-        }));
-        
-        console.log(`✅ Parsed ${parsedTransactions.length} transactions`);
-        console.log(`✅ Found ${parsedData.length} unique stock holdings`);
-      }
 
-      setAllTransactions(parsedTransactions);
+        setAllTransactions(transactions);
+        console.log(`✅ Parsed ${transactions.length} transactions`);
+        console.log(`📊 Portfolio contains ${Object.keys(portfolio).length} stocks`);
 
-      if (parsedData.length === 0) {
-        setUploadStatus(`📊 Loaded ${parsedTransactions.length} transactions (no stock holdings found)`);
-        setIsLoading(false);
-        return;
-      }
+        // Fetch live prices and enrich data
+        const portfolioArray = Object.values(portfolio);
+        setUploadStatus(`Fetching prices for ${portfolioArray.length} stocks...`);
 
-      setUploadStatus(`🔄 Loading ${parsedData.length} stocks with live data...`);
-      
-      // Enrich with live data
-      const enrichedData = await Promise.all(
-        parsedData.map(async (stock, index) => {
-          setUploadStatus(`🔄 Loading ${stock.symbol} (${index + 1}/${parsedData.length})...`);
-          
+        const enrichedPortfolio = [];
+        for (let i = 0; i < portfolioArray.length; i++) {
+          const stock = portfolioArray[i];
+          setUploadStatus(`Fetching data for ${stock.symbol} (${i + 1}/${portfolioArray.length})...`);
+
           const livePrice = await fetchLivePrice(stock.symbol);
           const currentValue = stock.shares * livePrice;
           const profitLoss = currentValue - stock.totalCost;
           const profitLossPercent = (profitLoss / stock.totalCost) * 100;
-          
-          // Alert for significant changes
-          if (Math.abs(profitLossPercent) > 10) {
-            showAlert(
-              `${stock.symbol}: ${profitLossPercent > 0 ? '+' : ''}${profitLossPercent.toFixed(2)}%`,
-              profitLossPercent > 0 ? 'gain' : 'loss'
-            );
-          }
-          
+
           const historical = await fetchHistoricalData(stock.symbol);
           const fundamentals = await fetchFundamentals(stock.symbol);
           const dividends = await fetchDividends(stock.symbol);
-          
-          return {
+
+          enrichedPortfolio.push({
             ...stock,
             currentPrice: livePrice,
             currentValue,
@@ -365,26 +489,26 @@ function App() {
             historical,
             fundamentals,
             dividends
-          };
-        })
-      );
+          });
+        }
 
-      setPortfolioData(enrichedData);
-      setPriceUpdateTime(new Date());
-      setUploadStatus(`✅ Successfully loaded ${enrichedData.length} stocks!`);
-      showAlert(`✅ Portfolio loaded: ${enrichedData.length} stocks`, 'success');
-      
-      setTimeout(() => setUploadStatus(''), 3000);
-      
-    } catch (error) {
-      console.error('❌ Upload error:', error);
-      setUploadStatus(`❌ Error: ${error.message}`);
-      showAlert('Failed to upload portfolio', 'error');
-    } finally {
-      setIsLoading(false);
-      event.target.value = '';
-    }
+        setPortfolioData(enrichedPortfolio);
+        setPriceUpdateTime(new Date());
+        setIsLoading(false);
+        setUploadStatus('');
+        showAlert(`✅ Successfully loaded ${enrichedPortfolio.length} stocks!`, 'success');
+
+      } catch (error) {
+        console.error('❌ Error parsing CSV:', error);
+        showAlert('❌ Failed to parse CSV file. Please check the format.', 'error');
+        setIsLoading(false);
+        setUploadStatus('');
+      }
+    };
+
+    reader.readAsText(file);
   };
+
   // ============================================
   // PORTFOLIO METRICS CALCULATOR
   // ============================================
@@ -517,28 +641,66 @@ function App() {
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
   };
-
   // ============================================
   // JSX RENDERING START
   // ============================================
   return (
     <div className="App">
-      {/* ALERTS - Fixed Top Right */}
-      <div className="alerts-container">
-        {alerts.map(alert => (
-          <div key={alert.id} className={`alert alert--${alert.type}`}>
-            <span className="alert__icon">
-              {alert.type === 'success' && '✅'}
-              {alert.type === 'error' && '❌'}
-              {alert.type === 'warning' && '⚠️'}
-              {alert.type === 'info' && 'ℹ️'}
-              {alert.type === 'gain' && '📈'}
-              {alert.type === 'loss' && '📉'}
-            </span>
-            <span className="alert__message">{alert.message}</span>
+      {/* NOTIFICATIONS PANEL - NEW: Collapsible, triggered by button */}
+      {showNotifications && alerts.length > 0 && (
+        <div className="notifications-panel">
+          <div className="notifications-panel__header">
+            <h3 className="notifications-panel__title">
+              <span className="panel-icon">🔔</span>
+              Notifications ({alerts.length})
+            </h3>
+            <button 
+              className="notifications-panel__close"
+              onClick={() => setShowNotifications(false)}
+              title="Close"
+            >
+              ×
+            </button>
           </div>
-        ))}
-      </div>
+          <div className="notifications-panel__content">
+            {alerts.map(alert => (
+              <div key={alert.id} className={`alert alert--${alert.type}`}>
+                <span className="alert__icon">
+                  {alert.type === 'success' && '✅'}
+                  {alert.type === 'error' && '❌'}
+                  {alert.type === 'warning' && '⚠️'}
+                  {alert.type === 'info' && 'ℹ️'}
+                  {alert.type === 'gain' && '📈'}
+                  {alert.type === 'loss' && '📉'}
+                </span>
+                <div className="alert__content">
+                  <span className="alert__message">{alert.message}</span>
+                  {alert.timestamp && (
+                    <span className="alert__time">
+                      {formatTimeAgo(alert.timestamp)}
+                    </span>
+                  )}
+                </div>
+                <button
+                  className="alert__dismiss"
+                  onClick={() => setAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                  title="Dismiss"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="notifications-panel__footer">
+            <button 
+              className="btn btn--secondary btn--sm"
+              onClick={() => setAlerts([])}
+            >
+              Clear All
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* LOADING OVERLAY */}
       {isLoading && (
@@ -550,7 +712,7 @@ function App() {
         </div>
       )}
 
-      {/* HEADER - Premium Design */}
+      {/* HEADER - Premium Design with Notifications Button */}
       <header className="header">
         <div className="header__content">
           <div className="header__brand">
@@ -569,6 +731,21 @@ function App() {
                   Updated {formatTimeAgo(priceUpdateTime)}
                 </span>
               </div>
+            )}
+            
+            {/* NEW: NOTIFICATIONS BUTTON - Shows badge with count */}
+            {alerts.length > 0 && (
+              <button 
+                className={`btn btn--secondary btn--icon ${showNotifications ? 'active' : ''}`}
+                onClick={() => setShowNotifications(!showNotifications)}
+                title="Notifications"
+              >
+                <span className="btn-icon">🔔</span>
+                <span className="btn-text">Notifications</span>
+                {alerts.length > 0 && (
+                  <span className="notification-count">{alerts.length}</span>
+                )}
+              </button>
             )}
             
             {portfolioData.length > 0 && (
@@ -771,13 +948,14 @@ function App() {
                     )}
                   </div>
                 )}
-                {/* STOCKS GRID - Premium Cards */}
+                {/* STOCKS GRID - Premium Cards with Fix Ticker Button */}
                 <div className="stocks-grid">
                   {portfolioData.map((stock, index) => (
                     <div 
                       key={index} 
                       className="stock-card"
-                      onClick={() => setSelectedStock(stock)}
+                      onClick={() => stock.currentPrice > 0 && setSelectedStock(stock)}
+                      style={{ cursor: stock.currentPrice > 0 ? 'pointer' : 'default' }}
                     >
                       {/* Card Header */}
                       <div className="stock-card__header">
@@ -801,13 +979,19 @@ function App() {
                       <div className="stock-card__price-section">
                         <div className="price-label">Current Price</div>
                         <div className="price-value">
-                          {formatCurrency(stock.currentPrice)}
-                          <span className="price-live-indicator" title="Live Price">●</span>
+                          {stock.currentPrice > 0 ? (
+                            <>
+                              {formatCurrency(stock.currentPrice)}
+                              <span className="price-live-indicator" title="Live Price">●</span>
+                            </>
+                          ) : (
+                            <span style={{color: 'var(--color-error)'}}>No Data</span>
+                          )}
                         </div>
                       </div>
 
                       {/* Mini Chart */}
-                      {stock.historical && stock.historical.length > 0 && (
+                      {stock.historical && stock.historical.length > 0 && stock.currentPrice > 0 && (
                         <div className="stock-card__chart-container">
                           {renderMiniChart(stock.historical)}
                         </div>
@@ -829,39 +1013,58 @@ function App() {
                         </div>
                         <div className="detail-row">
                           <span className="detail-label">Value:</span>
-                          <span className="detail-value">{formatCurrency(stock.currentValue)}</span>
+                          <span className="detail-value">
+                            {stock.currentPrice > 0 ? formatCurrency(stock.currentValue) : '-'}
+                          </span>
                         </div>
                         <div className="detail-row">
                           <span className="detail-label">P/L:</span>
                           <span className={`detail-value ${stock.profitLoss >= 0 ? 'positive' : 'negative'}`}>
-                            {stock.profitLoss >= 0 ? '+' : ''}{formatCurrency(stock.profitLoss)}
+                            {stock.currentPrice > 0 ? (
+                              <>{stock.profitLoss >= 0 ? '+' : ''}{formatCurrency(stock.profitLoss)}</>
+                            ) : '-'}
                           </span>
                         </div>
                       </div>
 
-                      {/* Action Buttons */}
+                      {/* Action Buttons - NEW: Shows Fix Ticker for missing prices */}
                       <div className="stock-card__actions">
-                        <button 
-                          className="action-btn action-btn--primary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setChartStock(stock);
-                            setShowChartModal(true);
-                          }}
-                        >
-                          <span className="action-btn__icon">📈</span>
-                          <span className="action-btn__text">Chart</span>
-                        </button>
-                        <button 
-                          className="action-btn action-btn--secondary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedStock(stock);
-                          }}
-                        >
-                          <span className="action-btn__icon">🔬</span>
-                          <span className="action-btn__text">Analysis</span>
-                        </button>
+                        {stock.currentPrice > 0 ? (
+                          <>
+                            <button 
+                              className="action-btn action-btn--primary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setChartStock(stock);
+                                setShowChartModal(true);
+                              }}
+                            >
+                              <span className="action-btn__icon">📈</span>
+                              <span className="action-btn__text">Chart</span>
+                            </button>
+                            <button 
+                              className="action-btn action-btn--secondary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedStock(stock);
+                              }}
+                            >
+                              <span className="action-btn__icon">🔬</span>
+                              <span className="action-btn__text">Analysis</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button 
+                            className="action-btn action-btn--warning full-width"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTickerSearch(stock.symbol);
+                            }}
+                          >
+                            <span className="action-btn__icon">🔧</span>
+                            <span className="action-btn__text">Fix Ticker Symbol</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Dividend Badge */}
@@ -875,9 +1078,11 @@ function App() {
                       )}
 
                       {/* Hover Overlay */}
-                      <div className="stock-card__hover-overlay">
-                        <span className="hover-text">Click for details</span>
-                      </div>
+                      {stock.currentPrice > 0 && (
+                        <div className="stock-card__hover-overlay">
+                          <span className="hover-text">Click for details</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -975,13 +1180,81 @@ function App() {
         )}
       </main>
 
+      {/* TICKER FIXER MODAL - NEW */}
+      {showTickerFixer && tickerToFix && (
+        <div className="modal-overlay" onClick={() => setShowTickerFixer(false)}>
+          <div className="modal-content ticker-fixer-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowTickerFixer(false)}>×</button>
+            
+            <div className="modal-header">
+              <div className="modal-header__main">
+                <h2 className="modal-symbol">🔧 Fix Ticker: {tickerToFix}</h2>
+                <p className="modal-company">Search for the correct symbol in the API</p>
+              </div>
+            </div>
+
+            <div className="modal-body">
+              {/* Search Box */}
+              <div className="ticker-search-box">
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search company name or symbol..."
+                  value={tickerSearchQuery}
+                  onChange={(e) => setTickerSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && performCustomSearch()}
+                />
+                <button 
+                  className="btn btn--primary"
+                  onClick={performCustomSearch}
+                  disabled={isLoading}
+                >
+                  🔍 Search
+                </button>
+              </div>
+
+              {/* Search Results */}
+              {searchResults.length > 0 && (
+                <div className="ticker-search-results">
+                  <h3 className="results-title">Found {searchResults.length} Results:</h3>
+                  <div className="results-list">
+                    {searchResults.map((result, index) => (
+                      <div 
+                        key={index} 
+                        className="result-item"
+                        onClick={() => applyTickerFix(tickerToFix, result.symbol)}
+                      >
+                        <div className="result-item__main">
+                          <span className="result-symbol">{result.symbol}</span>
+                          <span className="result-name">{result.name}</span>
+                        </div>
+                        <div className="result-item__meta">
+                          <span className="result-exchange">{result.exchange}</span>
+                          {result.currency && (
+                            <span className="result-currency">{result.currency}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {searchResults.length === 0 && tickerSearchQuery && (
+                <div className="ticker-search-empty">
+                  <p>No results found. Try a different search term.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* STOCK DETAIL MODAL */}
       {selectedStock && (
         <div className="modal-overlay" onClick={() => setSelectedStock(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSelectedStock(null)}>
-              ×
-            </button>
+            <button className="modal-close" onClick={() => setSelectedStock(null)}>×</button>
             
             {/* Modal Header */}
             <div className="modal-header">
