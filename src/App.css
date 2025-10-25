@@ -3,7 +3,9 @@
    Modern Fintech Design System
    ============================================ */
 
-/* CSS Variables & Design Tokens */
+/* ============================================
+   CSS VARIABLES & DESIGN TOKENS
+   ============================================ */
 :root {
   /* Colors - Dark Theme Primary */
   --color-primary: #32b8c6;
@@ -25,6 +27,7 @@
   --color-error: #ef4444;
   --color-error-bg: rgba(239, 68, 68, 0.1);
   --color-warning: #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.1);
   --color-info: #3b82f6;
   
   /* Borders & Dividers */
@@ -103,33 +106,24 @@ body {
 }
 
 /* ============================================
-   ALERTS SYSTEM - Fixed Top Right
+   NOTIFICATIONS PANEL - NEW: Collapsible
    ============================================ */
-.alerts-container {
+.notifications-panel {
   position: fixed;
   top: 20px;
   right: 20px;
+  width: 400px;
+  max-height: 80vh;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(20px);
   z-index: var(--z-alert);
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
-  pointer-events: none;
-  max-width: 400px;
-}
-
-.alert {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  background: var(--color-surface-elevated);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-lg);
-  backdrop-filter: blur(10px);
-  pointer-events: auto;
+  overflow: hidden;
   animation: slideInRight 0.3s ease-out;
-  min-width: 280px;
 }
 
 @keyframes slideInRight {
@@ -143,46 +137,159 @@ body {
   }
 }
 
+.notifications-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(135deg, rgba(50, 184, 198, 0.1) 0%, transparent 100%);
+}
+
+.notifications-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.panel-icon {
+  font-size: 1.3em;
+}
+
+.notifications-panel__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-normal);
+  line-height: 1;
+}
+
+.notifications-panel__close:hover {
+  background: var(--color-error);
+  border-color: var(--color-error);
+  transform: rotate(90deg);
+}
+
+.notifications-panel__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  transition: all var(--transition-normal);
+}
+
+.alert:hover {
+  background: var(--color-surface-elevated);
+  transform: translateX(-4px);
+}
+
 .alert__icon {
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   flex-shrink: 0;
+  line-height: 1;
+}
+
+.alert__content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
 }
 
 .alert__message {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
-  flex: 1;
+  line-height: 1.4;
+}
+
+.alert__time {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
+.alert__dismiss {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.alert__dismiss:hover {
+  background: var(--color-error);
+  border-color: var(--color-error);
+  color: var(--color-text);
 }
 
 .alert--success {
-  border-left: 4px solid var(--color-success);
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, var(--color-surface-elevated) 100%);
+  border-left: 3px solid var(--color-success);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, var(--color-surface) 100%);
 }
 
 .alert--error {
-  border-left: 4px solid var(--color-error);
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, var(--color-surface-elevated) 100%);
+  border-left: 3px solid var(--color-error);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, var(--color-surface) 100%);
 }
 
 .alert--warning {
-  border-left: 4px solid var(--color-warning);
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, var(--color-surface-elevated) 100%);
+  border-left: 3px solid var(--color-warning);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, var(--color-surface) 100%);
 }
 
 .alert--info {
-  border-left: 4px solid var(--color-info);
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, var(--color-surface-elevated) 100%);
+  border-left: 3px solid var(--color-info);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--color-surface) 100%);
 }
 
 .alert--gain {
-  border-left: 4px solid var(--color-success);
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, var(--color-surface-elevated) 100%);
+  border-left: 3px solid var(--color-success);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, var(--color-surface) 100%);
 }
 
 .alert--loss {
-  border-left: 4px solid var(--color-error);
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, var(--color-surface-elevated) 100%);
+  border-left: 3px solid var(--color-error);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, var(--color-surface) 100%);
+}
+
+.notifications-panel__footer {
+  padding: var(--space-md);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
 }
 
 /* ============================================
@@ -234,7 +341,7 @@ body {
 }
 
 /* ============================================
-   HEADER - Premium Design
+   HEADER - Premium Design with Notifications Button
    ============================================ */
 .header {
   background: var(--color-surface);
@@ -324,6 +431,22 @@ body {
   font-weight: 500;
 }
 
+/* NEW: Notification Count Badge */
+.notification-count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-error);
+  color: white;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: var(--space-xs);
+}
+
 /* ============================================
    BUTTONS - Modern Interactive Design
    ============================================ */
@@ -394,29 +517,45 @@ body {
   border-color: var(--color-border-hover);
 }
 
+.btn--secondary.active {
+  background: var(--color-primary);
+  color: #0f1419;
+  border-color: var(--color-primary);
+}
+
 .btn--large {
   padding: var(--space-md) var(--space-xl);
   font-size: 16px;
 }
 
+.btn--sm {
+  padding: var(--space-xs) var(--space-md);
+  font-size: 12px;
+}
+
+.btn--icon {
+  position: relative;
+}
+
 .btn-icon {
   font-size: 1.1em;
+  position: relative;
+  z-index: 1;
 }
 
 .btn-text {
   position: relative;
   z-index: 1;
 }
-
 /* ============================================
-   MAIN CONTENT
+   MAIN CONTENT AREA
    ============================================ */
 .main-content {
   flex: 1;
-  max-width: 1600px;
-  width: 100%;
-  margin: 0 auto;
   padding: var(--space-xl);
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 /* ============================================
@@ -426,7 +565,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: calc(100vh - 200px);
+  min-height: 70vh;
   padding: var(--space-2xl);
 }
 
@@ -442,7 +581,7 @@ body {
 }
 
 .empty-state__icon {
-  font-size: 5rem;
+  font-size: 6rem;
   position: relative;
   z-index: 2;
   animation: float 3s ease-in-out infinite;
@@ -457,17 +596,17 @@ body {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 150px;
-  height: 150px;
+  transform: translate(-50%, -50%);
+  width: 200px;
+  height: 200px;
   background: radial-gradient(circle, rgba(50, 184, 198, 0.2) 0%, transparent 70%);
   border-radius: 50%;
-  transform: translate(-50%, -50%);
   animation: pulse-bg 2s ease-in-out infinite;
 }
 
 @keyframes pulse-bg {
-  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
-  50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.3; }
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.8; }
 }
 
 .empty-state__title {
@@ -478,7 +617,7 @@ body {
 }
 
 .empty-state__description {
-  font-size: 1rem;
+  font-size: 1.1rem;
   color: var(--color-text-secondary);
   margin-bottom: var(--space-2xl);
   line-height: 1.6;
@@ -486,45 +625,37 @@ body {
 
 .empty-state__features {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--space-lg);
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-md);
   margin: var(--space-2xl) 0;
 }
 
 .feature-item {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-lg);
+  padding: var(--space-md);
   background: var(--color-surface);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
-  transition: all var(--transition-normal);
-}
-
-.feature-item:hover {
-  transform: translateY(-4px);
-  border-color: var(--color-primary);
-  box-shadow: var(--glow-primary);
 }
 
 .feature-icon {
-  font-size: 2rem;
+  font-size: 1.5rem;
 }
 
 .feature-text {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-text);
 }
 
 .empty-state__format {
-  margin-top: var(--space-2xl);
+  margin-top: var(--space-xl);
   padding: var(--space-lg);
-  background: rgba(50, 184, 198, 0.05);
-  border: 1px solid rgba(50, 184, 198, 0.2);
+  background: var(--color-surface);
   border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
 }
 
 .format-title {
@@ -532,18 +663,20 @@ body {
   font-weight: 600;
   color: var(--color-text-secondary);
   margin-bottom: var(--space-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .format-code {
   display: block;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--color-primary);
-  background: rgba(50, 184, 198, 0.1);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  margin-top: var(--space-sm);
+  color: var(--color-success);
 }
+
 /* ============================================
    VIEW TABS - Portfolio / Transactions
    ============================================ */
@@ -569,6 +702,7 @@ body {
   position: relative;
   transition: all var(--transition-normal);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
+  font-family: inherit;
 }
 
 .view-tab::after {
@@ -1056,6 +1190,21 @@ body {
   border-color: var(--color-border-hover);
 }
 
+/* NEW: Warning Button for Fix Ticker */
+.action-btn--warning {
+  background: linear-gradient(135deg, var(--color-warning) 0%, #e67e00 100%);
+  color: #0f1419;
+}
+
+.action-btn--warning:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+}
+
+.action-btn.full-width {
+  grid-column: 1 / -1;
+}
+
 .action-btn__icon {
   font-size: 1.1em;
 }
@@ -1277,7 +1426,7 @@ body {
 }
 
 /* ============================================
-   MODAL - Stock Details
+   MODAL - Stock Details & Ticker Fixer
    ============================================ */
 .modal-overlay {
   position: fixed;
@@ -1293,11 +1442,6 @@ body {
   z-index: var(--z-modal);
   padding: var(--space-xl);
   animation: fadeIn 0.3s ease-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 
 .modal-content {
@@ -1341,6 +1485,7 @@ body {
   justify-content: center;
   transition: all var(--transition-normal);
   z-index: 10;
+  line-height: 1;
 }
 
 .modal-close:hover {
@@ -1527,6 +1672,111 @@ body {
   color: var(--color-text);
 }
 
+/* NEW: Ticker Fixer Modal Specific Styles */
+.ticker-fixer-modal {
+  max-width: 700px;
+}
+
+.ticker-search-box {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.ticker-search-box .form-control {
+  flex: 1;
+  padding: var(--space-md);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.ticker-search-box .form-control:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(50, 184, 198, 0.2);
+}
+
+.ticker-search-results {
+  margin-top: var(--space-lg);
+}
+
+.results-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: var(--space-md);
+}
+
+.results-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.result-item:hover {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-primary);
+  transform: translateX(8px);
+}
+
+.result-item__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.result-symbol {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  font-family: var(--font-mono);
+}
+
+.result-name {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.result-item__meta {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.result-exchange,
+.result-currency {
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.ticker-search-empty {
+  padding: var(--space-2xl);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
 /* ============================================
    RESPONSIVE DESIGN
    ============================================ */
@@ -1534,10 +1784,16 @@ body {
   .header__content {
     flex-direction: column;
     align-items: stretch;
+    gap: var(--space-md);
   }
   
   .header__actions {
     justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  
+  .notification-count {
+    position: static;
   }
   
   .stocks-grid {
@@ -1554,6 +1810,15 @@ body {
   }
   
   .modal-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .notifications-panel {
+    width: calc(100vw - 40px);
+    right: 20px;
+  }
+  
+  .empty-state__features {
     grid-template-columns: 1fr;
   }
 }
@@ -1578,4 +1843,15 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-primary);
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+.positive {
+  color: var(--color-success) !important;
+}
+
+.negative {
+  color: var(--color-error) !important;
 }
