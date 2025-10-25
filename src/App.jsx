@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import './App.css';  //
+import './App.css';
+
 // API Configuration
 const API_KEYS = {
   finnhub: 'd3r39m1r01qopgh6pgbgd3r39m1r01qopgh6pgc0',
