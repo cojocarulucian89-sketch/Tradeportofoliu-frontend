@@ -150,164 +150,163 @@ function App() {
     }
   };
 
-  // Handle file upload with REVOLUT FORMAT SUPPORT
- // Handle file upload with REVOLUT FORMAT SUPPORT
-const handleFileUpload = async (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
+  // Handle file upload with REVOLUT FORMAT SUPPORT - FUNCȚIE CORECTATĂ
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
 
-  setIsLoading(true);
-  setUploadStatus(`Uploading ${file.name}...`);
+    setIsLoading(true);
+    setUploadStatus(`Uploading ${file.name}...`);
 
-  try {
-    const text = await file.text();
-    const lines = text.split('\n').filter(line => line.trim());
-    
-    if (lines.length === 0) {
-      setUploadStatus('No data found in file');
-      setIsLoading(false);
-      return;
-    }
-
-    const header = lines[0].toLowerCase();
-    let parsedData = [];
-
-    // DETECT FORMAT: Revolut vs Simple CSV
-    if (header.includes('ticker') && header.includes('type') && header.includes('quantity')) {
-      // ✅ REVOLUT FORMAT
-      console.log('Detected Revolut format');
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
       
-      const holdings = {};
-      
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
+      if (lines.length === 0) {
+        setUploadStatus('No data found in file');
+        setIsLoading(false);
+        return;
+      }
+
+      const header = lines[0].toLowerCase();
+      let parsedData = [];
+
+      // DETECT FORMAT: Revolut vs Simple CSV
+      if (header.includes('ticker') && header.includes('type') && header.includes('quantity')) {
+        // ✅ REVOLUT FORMAT
+        console.log('Detected Revolut format');
         
-        // Split by comma, handle quoted values
-        const values = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+        const holdings = {};
         
-        if (values.length < 6) continue;
-        
-        const ticker = values[1]?.replace(/"/g, '').trim();
-        const type = values[2]?.replace(/"/g, '').trim();
-        const quantityStr = values[3]?.replace(/"/g, '').trim();
-        const priceStr = values[4]?.replace(/"/g, '').replace('€', '').replace('$', '').trim();
-        
-        // Only process BUY transactions
-        if (!ticker || !type.includes('BUY')) continue;
-        
-        const quantity = parseFloat(quantityStr);
-        const price = parseFloat(priceStr);
-        
-        if (isNaN(quantity) || isNaN(price) || quantity <= 0) continue;
-        
-        // Aggregate by ticker
-        if (!holdings[ticker]) {
-          holdings[ticker] = {
-            symbol: ticker,
-            totalShares: 0,
-            totalCost: 0,
-            transactions: []
-          };
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          // Split by comma, handle quoted values
+          const values = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+          
+          if (values.length < 6) continue;
+          
+          const ticker = values[1]?.replace(/"/g, '').trim();
+          const type = values[2]?.replace(/"/g, '').trim();
+          const quantityStr = values[3]?.replace(/"/g, '').trim();
+          const priceStr = values[4]?.replace(/"/g, '').replace('€', '').replace('$', '').trim();
+          
+          // Only process BUY transactions
+          if (!ticker || !type.includes('BUY')) continue;
+          
+          const quantity = parseFloat(quantityStr);
+          const price = parseFloat(priceStr);
+          
+          if (isNaN(quantity) || isNaN(price) || quantity <= 0) continue;
+          
+          // Aggregate by ticker
+          if (!holdings[ticker]) {
+            holdings[ticker] = {
+              symbol: ticker,
+              totalShares: 0,
+              totalCost: 0,
+              transactions: []
+            };
+          }
+          
+          holdings[ticker].totalShares += quantity;
+          holdings[ticker].totalCost += (quantity * price);
+          holdings[ticker].transactions.push({ quantity, price });
         }
         
-        holdings[ticker].totalShares += quantity;
-        holdings[ticker].totalCost += (quantity * price);
-        holdings[ticker].transactions.push({ quantity, price });
-      }
-      
-      // Convert to array and calculate average buy price
-      parsedData = Object.values(holdings).map(holding => ({
-        symbol: holding.symbol,
-        shares: holding.totalShares,
-        buyPrice: holding.totalCost / holding.totalShares,
-        totalCost: holding.totalCost
-      }));
-      
-    } else {
-      // ✅ SIMPLE FORMAT (Symbol,Shares,BuyPrice,TotalCost)
-      console.log('Detected simple format');
-      
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
+        // Convert to array and calculate average buy price
+        parsedData = Object.values(holdings).map(holding => ({
+          symbol: holding.symbol,
+          shares: holding.totalShares,
+          buyPrice: holding.totalCost / holding.totalShares,
+          totalCost: holding.totalCost
+        }));
         
-        const values = line.includes(';') ? line.split(';') : line.split(',');
+      } else {
+        // ✅ SIMPLE FORMAT (Symbol,Shares,BuyPrice,TotalCost)
+        console.log('Detected simple format');
         
-        if (values.length >= 4) {
-          const symbol = values[0].trim();
-          const shares = parseFloat(values[1].trim());
-          const buyPrice = parseFloat(values[2].trim());
-          const totalCost = parseFloat(values[3].trim());
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
           
-          if (symbol && !isNaN(shares) && !isNaN(buyPrice) && shares > 0) {
-            parsedData.push({
-              symbol,
-              shares,
-              buyPrice,
-              totalCost: totalCost || (shares * buyPrice)
-            });
+          const values = line.includes(';') ? line.split(';') : line.split(',');
+          
+          if (values.length >= 4) {
+            const symbol = values[0].trim();
+            const shares = parseFloat(values[1].trim());
+            const buyPrice = parseFloat(values[2].trim());
+            const totalCost = parseFloat(values[3].trim());
+            
+            if (symbol && !isNaN(shares) && !isNaN(buyPrice) && shares > 0) {
+              parsedData.push({
+                symbol,
+                shares,
+                buyPrice,
+                totalCost: totalCost || (shares * buyPrice)
+              });
+            }
           }
         }
       }
-    }
 
-    if (parsedData.length === 0) {
-      setUploadStatus('No valid data found');
+      if (parsedData.length === 0) {
+        setUploadStatus('No valid data found');
+        setIsLoading(false);
+        return;
+      }
+
+      console.log(`Parsed ${parsedData.length} holdings:`, parsedData);
+      
+      setUploadStatus(`Loaded ${parsedData.length} stocks. Fetching live data...`);
+      
+      // Fetch live prices for all stocks
+      const enrichedData = await Promise.all(
+        parsedData.map(async (stock) => {
+          const livePrice = await fetchLivePrice(stock.symbol);
+          const currentValue = stock.shares * livePrice;
+          const profitLoss = currentValue - stock.totalCost;
+          const profitLossPercent = (profitLoss / stock.totalCost) * 100;
+          
+          // Show alert for significant changes
+          if (Math.abs(profitLossPercent) > 5) {
+            showAlert(
+              `${stock.symbol}: ${profitLossPercent > 0 ? '+' : ''}${profitLossPercent.toFixed(2)}%`,
+              profitLossPercent > 0 ? 'gain' : 'loss'
+            );
+          }
+          
+          const historical = await fetchHistoricalData(stock.symbol);
+          const fundamentals = await fetchFundamentals(stock.symbol);
+          const dividends = await fetchDividends(stock.symbol);
+          
+          return {
+            ...stock,
+            currentPrice: livePrice,
+            currentValue,
+            profitLoss,
+            profitLossPercent,
+            historical,
+            fundamentals,
+            dividends
+          };
+        })
+      );
+
+      setPortfolioData(enrichedData);
+      setUploadStatus(`Successfully loaded ${enrichedData.length} stocks with full data!`);
+      
+      setTimeout(() => setUploadStatus(''), 3000);
+      
+    } catch (error) {
+      console.error('Upload error:', error);
+      setUploadStatus(`Error: ${error.message}`);
+    } finally {
       setIsLoading(false);
-      return;
+      event.target.value = '';
     }
-
-    console.log(`Parsed ${parsedData.length} holdings:`, parsedData);
-    
-    setUploadStatus(`Loaded ${parsedData.length} stocks. Fetching live data...`);
-    
-    // Fetch live prices for all stocks
-    const enrichedData = await Promise.all(
-      parsedData.map(async (stock) => {
-        const livePrice = await fetchLivePrice(stock.symbol);
-        const currentValue = stock.shares * livePrice;
-        const profitLoss = currentValue - stock.totalCost;
-        const profitLossPercent = (profitLoss / stock.totalCost) * 100;
-        
-        // Show alert for significant changes
-        if (Math.abs(profitLossPercent) > 5) {
-          showAlert(
-            `${stock.symbol}: ${profitLossPercent > 0 ? '+' : ''}${profitLossPercent.toFixed(2)}%`,
-            profitLossPercent > 0 ? 'gain' : 'loss'
-          );
-        }
-        
-        const historical = await fetchHistoricalData(stock.symbol);
-        const fundamentals = await fetchFundamentals(stock.symbol);
-        const dividends = await fetchDividends(stock.symbol);
-        
-        return {
-          ...stock,
-          currentPrice: livePrice,
-          currentValue,
-          profitLoss,
-          profitLossPercent,
-          historical,
-          fundamentals,
-          dividends
-        };
-      })
-    );
-
-    setPortfolioData(enrichedData);
-    setUploadStatus(`Successfully loaded ${enrichedData.length} stocks with full data!`);
-    
-    setTimeout(() => setUploadStatus(''), 3000);
-    
-  } catch (error) {
-    console.error('Upload error:', error);
-    setUploadStatus(`Error: ${error.message}`);
-  } finally {
-    setIsLoading(false);
-    event.target.value = '';
-  }
-};
+  };
   // Calculate portfolio metrics
   const calculateMetrics = () => {
     if (portfolioData.length === 0) return null;
@@ -388,6 +387,7 @@ const handleFileUpload = async (event) => {
           </div>
         </div>
       )}
+
       {/* Header */}
       <header className="header">
         <h1>📊 NEWTRADE Pro AI Sentinel</h1>
@@ -551,7 +551,6 @@ const handleFileUpload = async (event) => {
           </div>
         </>
       )}
-
       {/* Modal for Stock Details */}
       {selectedStock && (
         <div className="modal-overlay" onClick={() => setSelectedStock(null)}>
