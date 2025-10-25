@@ -55,27 +55,29 @@ function App() {
   const [portfolio, setPortfolio] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
-  const [showAIChat, setShowAIChat] = useState(false);
-  const [aiMessages, setAiMessages] = useState([]);
-  const [aiInput, setAiInput] = useState('');
   const [priceCache, setPriceCache] = useState({});
   const [selectedStock, setSelectedStock] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [darkMode, setDarkMode] = useState(false);
   const fileInputRef = useRef(null);
 
   // 💾 Load portfolio from localStorage on mount
   useEffect(() => {
     const savedPortfolio = localStorage.getItem('portfolio_data');
     const timestamp = localStorage.getItem('portfolio_timestamp');
+    const savedDarkMode = localStorage.getItem('dark_mode');
+    
+    if (savedDarkMode) {
+      setDarkMode(savedDarkMode === 'true');
+    }
     
     if (savedPortfolio) {
       try {
         const data = JSON.parse(savedPortfolio);
         const age = Date.now() - parseInt(timestamp || '0');
         
-        // Restore if less than 24 hours old
         if (age < 24 * 60 * 60 * 1000) {
           setPortfolio(data);
-          // Refresh prices in background
           updatePortfolioWithPrices(data.map(s => ({
             symbol: s.symbol,
             shares: s.shares,
@@ -89,7 +91,7 @@ function App() {
     }
   }, []);
 
-  // 💾 Save portfolio to localStorage whenever it changes
+  // 💾 Save portfolio to localStorage
   useEffect(() => {
     if (portfolio.length > 0) {
       localStorage.setItem('portfolio_data', JSON.stringify(portfolio));
@@ -97,7 +99,33 @@ function App() {
     }
   }, [portfolio]);
 
-  // Fetch stock price from Finnhub API
+  // 🌙 Dark mode toggle
+  useEffect(() => {
+    document.body.classList.toggle('dark-mode', darkMode);
+    localStorage.setItem('dark_mode', darkMode.toString());
+  }, [darkMode]);
+
+  // 🔔 Check for alerts
+  useEffect(() => {
+    portfolio.forEach(stock => {
+      if (stock.profitLossPct < -10 && !alerts.find(a => a.symbol === stock.symbol && a.type === 'loss')) {
+        addAlert(stock.symbol, 'loss', `${stock.symbol} down ${Math.abs(stock.profitLossPct).toFixed(2)}%`);
+      }
+      if (stock.profitLossPct > 20 && !alerts.find(a => a.symbol === stock.symbol && a.type === 'gain')) {
+        addAlert(stock.symbol, 'gain', `${stock.symbol} up ${stock.profitLossPct.toFixed(2)}%`);
+      }
+    });
+  }, [portfolio]);
+
+  const addAlert = (symbol, type, message) => {
+    const newAlert = { id: Date.now(), symbol, type, message };
+    setAlerts(prev => [...prev, newAlert]);
+    setTimeout(() => {
+      setAlerts(prev => prev.filter(a => a.id !== newAlert.id));
+    }, 5000);
+  };
+
+  // Fetch stock price
   const fetchStockPrice = async (symbol) => {
     if (priceCache[symbol] && Date.now() - priceCache[symbol].timestamp < 30000) {
       return priceCache[symbol].price;
@@ -124,7 +152,7 @@ function App() {
     }
   };
 
-  // Fetch historical chart data
+  // Fetch chart data
   const fetchChartData = async (symbol) => {
     try {
       const to = Math.floor(Date.now() / 1000);
@@ -148,7 +176,45 @@ function App() {
     }
   };
 
-  // 🚀 Update portfolio with live prices - SEQUENTIAL (fixes black screen)
+  // 📊 Fetch company info
+  const fetchCompanyInfo = async (symbol) => {
+    try {
+      const response = await fetch(
+        `https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${API_KEYS.finnhub}`
+      );
+      const data = await response.json();
+      return {
+        name: data.name || symbol,
+        industry: data.finnhubIndustry || 'N/A',
+        marketCap: data.marketCapitalization || 0,
+        country: data.country || 'N/A',
+        currency: data.currency || 'USD',
+        logo: data.logo || ''
+      };
+    } catch (error) {
+      console.error(`Error fetching company info for ${symbol}:`, error);
+      return null;
+    }
+  };
+
+  // 💰 Fetch dividends
+  const fetchDividends = async (symbol) => {
+    try {
+      const to = new Date().toISOString().split('T')[0];
+      const from = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      const response = await fetch(
+        `https://finnhub.io/api/v1/stock/dividend?symbol=${symbol}&from=${from}&to=${to}&token=${API_KEYS.finnhub}`
+      );
+      const data = await response.json();
+      return data || [];
+    } catch (error) {
+      console.error(`Error fetching dividends for ${symbol}:`, error);
+      return [];
+    }
+  };
+
+  // 🚀 Update portfolio with prices - SEQUENTIAL
   const updatePortfolioWithPrices = async (portfolioData) => {
     setLoading(true);
     const updatedPortfolio = [];
@@ -156,13 +222,14 @@ function App() {
     for (let i = 0; i < portfolioData.length; i++) {
       const stock = portfolioData[i];
       
-      // Rate limiting: 300ms delay between requests
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 300));
       }
       
       const currentPrice = await fetchStockPrice(stock.symbol);
       const chartData = await fetchChartData(stock.symbol);
+      const companyInfo = await fetchCompanyInfo(stock.symbol);
+      const dividends = await fetchDividends(stock.symbol);
       
       if (!currentPrice) {
         updatedPortfolio.push({
@@ -171,7 +238,9 @@ function App() {
           currentValue: stock.shares * stock.buyPrice,
           profitLoss: 0,
           profitLossPct: 0,
-          chartData: []
+          chartData: [],
+          companyInfo,
+          dividends
         });
         continue;
       }
@@ -188,14 +257,17 @@ function App() {
         totalCost,
         profitLoss,
         profitLossPct,
-        chartData
+        chartData,
+        companyInfo,
+        dividends
       });
     }
 
     setPortfolio(updatedPortfolio);
     setLoading(false);
   };
-  // Handle CSV file upload
+
+  // Handle CSV upload
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -246,7 +318,7 @@ function App() {
     reader.readAsText(file);
   };
 
-  // Calculate portfolio metrics
+  // Calculate metrics
   const calculateMetrics = () => {
     const totalValue = portfolio.reduce((sum, stock) => sum + stock.currentValue, 0);
     const totalCost = portfolio.reduce((sum, stock) => sum + stock.totalCost, 0);
@@ -267,7 +339,7 @@ function App() {
     };
   };
 
-  // Export portfolio to CSV
+  // Export to CSV
   const exportToCSV = () => {
     const headers = ['Symbol', 'Shares', 'Buy Price', 'Current Price', 'Total Cost', 'Current Value', 'Profit/Loss', 'P/L %'];
     const rows = portfolio.map(stock => [
@@ -298,10 +370,24 @@ function App() {
 
   return (
     <div id="root">
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div className="alerts-container">
+          {alerts.map(alert => (
+            <div key={alert.id} className={`alert alert--${alert.type}`}>
+              {alert.message}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Header */}
       <div className="header">
         <h1>NEWTRADE Pro AI Sentinel</h1>
         <div className="header-actions">
+          <button className="btn btn--icon" onClick={() => setDarkMode(!darkMode)} title="Toggle Dark Mode">
+            {darkMode ? '☀️' : '🌙'}
+          </button>
           <button className="btn btn--primary" onClick={() => fileInputRef.current?.click()}>
             📁 Upload CSV
           </button>
@@ -326,7 +412,7 @@ function App() {
                   totalCost: s.totalCost
                 })))}
               >
-                🔄 Refresh Prices
+                🔄 Refresh
               </button>
             </>
           )}
@@ -368,7 +454,7 @@ function App() {
 
       {portfolio.length > 0 && (
         <>
-          {/* Portfolio Summary Cards */}
+          {/* Portfolio Summary */}
           <div className="metrics-grid">
             <div className="metric-card">
               <div className="metric-card__label">Total Value</div>
@@ -399,7 +485,7 @@ function App() {
           {/* Stock Cards Grid */}
           <div className="stocks-grid">
             {portfolio.map((stock, index) => (
-              <div key={index} className="stock-card">
+              <div key={index} className="stock-card" onClick={() => setSelectedStock(stock)}>
                 <div className="stock-card__header">
                   <div className="stock-card__symbol">{stock.symbol}</div>
                   <div className={`stock-card__change ${stock.profitLoss >= 0 ? 'positive' : 'negative'}`}>
@@ -427,16 +513,8 @@ function App() {
                     <span className="detail-label">Buy Price:</span>
                     <span className="detail-value">${stock.buyPrice.toFixed(2)}</span>
                   </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Total Cost:</span>
-                    <span className="detail-value">${stock.totalCost.toFixed(2)}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span className="detail-label">Current Value:</span>
-                    <span className="detail-value">${stock.currentValue.toFixed(2)}</span>
-                  </div>
                   <div className={`detail-row detail-row--highlight ${stock.profitLoss >= 0 ? 'positive' : 'negative'}`}>
-                    <span className="detail-label">Profit/Loss:</span>
+                    <span className="detail-label">P/L:</span>
                     <span className="detail-value">
                       {stock.profitLoss >= 0 ? '+' : ''}${stock.profitLoss.toFixed(2)}
                     </span>
@@ -445,6 +523,63 @@ function App() {
               </div>
             ))}
           </div>
+
+          {/* Stock Detail Modal */}
+          {selectedStock && (
+            <div className="modal-overlay" onClick={() => setSelectedStock(null)}>
+              <div className="modal-content" onClick={e => e.stopPropagation()}>
+                <button className="modal-close" onClick={() => setSelectedStock(null)}>✕</button>
+                <h2>{selectedStock.symbol}</h2>
+                {selectedStock.companyInfo && selectedStock.companyInfo.name && (
+                  <p className="modal-subtitle">{selectedStock.companyInfo.name}</p>
+                )}
+                
+                <div className="modal-sections">
+                  <div className="modal-section">
+                    <h3>📊 Performance</h3>
+                    <div className="detail-grid">
+                      <div><strong>Current Price:</strong> ${selectedStock.currentPrice.toFixed(2)}</div>
+                      <div><strong>Buy Price:</strong> ${selectedStock.buyPrice.toFixed(2)}</div>
+                      <div><strong>Shares:</strong> {selectedStock.shares}</div>
+                      <div><strong>Total Value:</strong> ${selectedStock.currentValue.toFixed(2)}</div>
+                      <div><strong>Total Cost:</strong> ${selectedStock.totalCost.toFixed(2)}</div>
+                      <div><strong>P/L:</strong> 
+                        <span className={selectedStock.profitLoss >= 0 ? 'positive' : 'negative'}>
+                          {' '}{selectedStock.profitLoss >= 0 ? '+' : ''}${selectedStock.profitLoss.toFixed(2)} ({selectedStock.profitLossPct.toFixed(2)}%)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedStock.companyInfo && selectedStock.companyInfo.name !== selectedStock.symbol && (
+                    <div className="modal-section">
+                      <h3>🏢 Company Info</h3>
+                      <div className="detail-grid">
+                        <div><strong>Industry:</strong> {selectedStock.companyInfo.industry}</div>
+                        <div><strong>Market Cap:</strong> ${(selectedStock.companyInfo.marketCap * 1000000).toLocaleString()}</div>
+                        <div><strong>Country:</strong> {selectedStock.companyInfo.country}</div>
+                        <div><strong>Currency:</strong> {selectedStock.companyInfo.currency}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedStock.dividends && selectedStock.dividends.length > 0 && (
+                    <div className="modal-section">
+                      <h3>💰 Dividend History</h3>
+                      <div className="dividend-list">
+                        {selectedStock.dividends.slice(0, 5).map((div, idx) => (
+                          <div key={idx} className="dividend-item">
+                            <span>{div.date}</span>
+                            <span>${div.amount.toFixed(4)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
