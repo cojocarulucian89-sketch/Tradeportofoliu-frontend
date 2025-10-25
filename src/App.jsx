@@ -99,35 +99,35 @@ function App() {
   const [priceCache, setPriceCache] = useState({});
   const fileInputRef = useRef(null);
 
-   // Fetch stock price and currency from Finnhub API
+    // Fetch stock price from Finnhub API
   const fetchStockPrice = async (symbol) => {
     // Check cache first
     if (priceCache[symbol] && Date.now() - priceCache[symbol].timestamp < 30000) {
-      return priceCache[symbol];
+      return priceCache[symbol].price;
     }
 
     try {
-      // Get stock profile to determine exchange/currency
-      const profileResponse = await fetch(
-        `https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${API_KEYS.finnhub}`
+      const response = await fetch(
+        `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${API_KEYS.finnhub}`
       );
-      const profileData = await profileResponse.json();
+      const data = await response.json();
       
-      // Determine currency based on exchange
-      let currency = '$'; // Default to USD
-      if (profileData.currency) {
-        currency = profileData.currency === 'EUR' ? '€' : 
-                   profileData.currency === 'GBP' ? '£' : 
-                   profileData.currency === 'USD' ? '$' : '$';
-      } else if (profileData.exchange) {
-        // Fallback: detect from exchange name
-        const exchange = profileData.exchange.toUpperCase();
-        if (exchange.includes('XETRA') || exchange.includes('EURONEXT') || exchange.includes('PARIS')) {
-          currency = '€';
-        } else if (exchange.includes('LONDON') || exchange.includes('LSE')) {
-          currency = '£';
-        }
+      if (data.c && data.c > 0) {
+        const price = data.c; // Current price
+        setPriceCache(prev => ({
+          ...prev,
+          [symbol]: { price, timestamp: Date.now() }
+        }));
+        return price;
       }
+      
+      return null;
+    } catch (error) {
+      console.error(`Error fetching price for ${symbol}:`, error);
+      return null;
+    }
+  };
+
       
       // Get quote (price)
       const quoteResponse = await fetch(
