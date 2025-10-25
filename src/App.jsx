@@ -6,10 +6,44 @@ const API_KEYS = {
   eodhd: '68f772ba2a7c87.32575988',
   fmp: 'XI00gXR2R27tsNEbChNxAPODUrhXaCPi'
 };
-
 // Mini Chart Component
 const MiniChart = ({ data }) => {
   const canvasRef = useRef(null);
+    // 💾 PERSISTENȚĂ - Salvare automată în localStorage
+  useEffect(() => {
+    if (portfolio.length > 0) {
+      localStorage.setItem('portfolio_data', JSON.stringify(portfolio));
+      localStorage.setItem('portfolio_timestamp', Date.now().toString());
+    }
+  }, [portfolio]);
+
+  // 🔄 RESTAURARE - Încărcare automată la refresh
+  useEffect(() => {
+    const savedData = localStorage.getItem('portfolio_data');
+    const timestamp = localStorage.getItem('portfolio_timestamp');
+    
+    if (savedData) {
+      try {
+        const data = JSON.parse(savedData);
+        const age = Date.now() - parseInt(timestamp || '0');
+        
+        // Restore if data is less than 24 hours old
+        if (age < 24 * 60 * 60 * 1000) {
+          setPortfolio(data);
+          // Refresh prices
+          updatePortfolioWithPrices(data.map(s => ({
+            symbol: s.symbol,
+            shares: s.shares,
+            buyPrice: s.buyPrice,
+            totalCost: s.totalCost
+          })));
+        }
+      } catch (error) {
+        console.error('Error restoring portfolio:', error);
+      }
+    }
+  }, []);
+
 
   useEffect(() => {
     if (!data || data.length === 0) return;
